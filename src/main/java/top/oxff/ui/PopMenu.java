@@ -5,24 +5,24 @@ import burp.api.montoya.core.HighlightColor;
 import burp.api.montoya.core.Range;
 import burp.api.montoya.core.ToolType;
 import burp.api.montoya.http.message.HttpRequestResponse;
+import burp.api.montoya.http.message.params.ParsedHttpParameter;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.logging.Logging;
 import burp.api.montoya.proxy.ProxyHttpRequestResponse;
-import burp.api.montoya.ui.Selection;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 import burp.api.montoya.ui.contextmenu.MessageEditorHttpRequestResponse;
-import top.oxff.HighLighter;
+import top.oxff.GlobalVar;
+import top.oxff.tools.HttpTools;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.*;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.*;
 
-import static top.oxff.HighLighter.COLOR_STRING_MAP;
+import static top.oxff.Constant.*;
 
-public class PopMenu  implements ContextMenuItemsProvider {
+public class PopMenu implements ContextMenuItemsProvider {
     private final MontoyaApi api;
     private final Logging logger;
 
@@ -35,15 +35,18 @@ public class PopMenu  implements ContextMenuItemsProvider {
     @Override
     public List<Component> provideMenuItems(ContextMenuEvent event) {
         logger.logToOutput("PopMenu");
-        if (event.isFromTool(ToolType.PROXY)){
+        if (event.isFromTool(ToolType.PROXY)) {
             return proxyMenu(event);
         } else if (event.isFromTool(ToolType.REPEATER)) {
             return repeaterMenu(event);
         } else if (event.isFromTool(ToolType.LOGGER)) {
-
+            // TODO
+            /**
+             * 1. 获取所有请求
+             */
         } else if (event.isFromTool(ToolType.INTRUDER)) {
-
-        }else {
+            // TODO
+        } else {
             return null;
         }
         return null;
@@ -51,25 +54,13 @@ public class PopMenu  implements ContextMenuItemsProvider {
 
     private List<Component> proxyMenu(ContextMenuEvent event) {
         logger.logToOutput("proxyMenu()...");
-        List<Component> menuItemList = new ArrayList<>();
+
         List<HttpRequestResponse> selectededRequestResponseList = event.selectedRequestResponses();
-        if (selectededRequestResponseList.isEmpty()){
-            logger.logToOutput("未选择");
-            JMenuItem removeAllHighLightItem = new JMenuItem("取消所有高亮");
-            removeAllHighLightItem.addActionListener(e -> {
-                SwingUtilities.invokeLater(() -> {
-                    List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
-                    for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
-                        proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
-                    }
-                    HighLighter.requestHighlightKey.clear();
-                });
-            });
-            menuItemList.add(removeAllHighLightItem);
-            return menuItemList;
+        if (selectededRequestResponseList.isEmpty()) {
+            return getComponentListIfSelectNoRequestOnHistoryBoard(event);
         }
 
-
+        List<Component> menuItemList = new ArrayList<>();
         JMenu addHighLightMenu = new JMenu("添加高亮");
         JMenu removeHighLightMenu = new JMenu("取消高亮");
 
@@ -82,11 +73,72 @@ public class PopMenu  implements ContextMenuItemsProvider {
         return menuItemList;
     }
 
+    private List<Component> getComponentListIfSelectNoRequestOnHistoryBoard(ContextMenuEvent event) {
+        logger.logToOutput("getComponentListIfSelectNoRequestOnHistoryBoard()...");
+        List<Component> menuItemList = new ArrayList<>();
+        JMenuItem removeAllHighLightItem = new JMenuItem("取消所有高亮");
+        removeAllHighLightItem.addActionListener(e -> SwingUtilities.invokeLater(() -> {
+            List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
+            for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
+                proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
+            }
+            GlobalVar.highLightPathSet.clear();
+        }));
+        menuItemList.add(removeAllHighLightItem);
+
+        if (event.messageEditorRequestResponse().isPresent()) {
+            MessageEditorHttpRequestResponse messageEditorHttpRequestResponse = event.messageEditorRequestResponse()
+                                                                                     .get();
+            if (messageEditorHttpRequestResponse.selectionOffsets().isPresent()) {
+                Range selectionOffsets = messageEditorHttpRequestResponse.selectionOffsets().get();
+                int start = selectionOffsets.startIndexInclusive();
+                int end = selectionOffsets.endIndexExclusive();
+                int selectLength = end - start;
+                HttpRequestResponse httpRequestResponse = messageEditorHttpRequestResponse.requestResponse();
+                HttpRequest httpRequest = httpRequestResponse.request();
+                byte[] requestBytes = httpRequest.toByteArray().getBytes();
+                byte[] selectedBytes = Arrays.copyOfRange(requestBytes, start, end);
+                boolean isPrintable = HttpTools.isBytesPrintable(selectedBytes);
+                if (isPrintable && MINI_SELECT_STRING_LENGTH <= selectLength) {
+                    String selectString = event.messageEditorRequestResponse().get().requestResponse().request()
+                                               .toString().substring(start, end);
+                    JMenu addHighLightMenu = new JMenu("添加选择字符串高亮");
+                    COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
+                        JMenuItem addHighLightItem = new JMenuItem(COLOR_STRING_MAP.get(color));
+                        addHighLightItem.setBackground(color);
+                        addHighLightItem.setOpaque(true);
+                        addHighLightItem.addActionListener(e -> {
+                            GlobalVar.highLightSelectStringSet.add(selectString);
+                            GlobalVar.selectStringHighlightColor.put(selectString, highlightColor);
+                            for (ProxyHttpRequestResponse proxyHttpRequestResponse : api.proxy().history()) {
+                                if (HttpTools.isProxyHttpRequestResponsePrintable(proxyHttpRequestResponse)) {
+
+                                    String requestString = proxyHttpRequestResponse.request().toString();
+                                    if (GlobalVar.isHighLightSelectString(requestString)){
+                                        proxyHttpRequestResponse.annotations().setHighlightColor(highlightColor);
+                                    }
+                                }
+                            }
+                            httpRequestResponse.annotations().setHighlightColor(highlightColor);
+                        });
+                        addHighLightMenu.add(addHighLightItem);
+                    });
+                    menuItemList.add(addHighLightMenu);
+                }
+            }
+
+        }
+
+        return menuItemList;
+    }
+
     private List<Component> repeaterMenu(ContextMenuEvent event) {
         logger.logToOutput("repeaterMenu()...");
-        MessageEditorHttpRequestResponse.SelectionContext selectionContext = event.messageEditorRequestResponse().get().selectionContext();
-        if (!(event.messageEditorRequestResponse().isPresent() && event.messageEditorRequestResponse().get().selectionOffsets().isPresent()) ||
-        !selectionContext.equals(MessageEditorHttpRequestResponse.SelectionContext.REQUEST)){
+        MessageEditorHttpRequestResponse.SelectionContext selectionContext = event.messageEditorRequestResponse().get()
+                                                                                  .selectionContext();
+        if (!(event.messageEditorRequestResponse().isPresent() && event.messageEditorRequestResponse().get()
+                                                                       .selectionOffsets().isPresent()) ||
+                !selectionContext.equals(MessageEditorHttpRequestResponse.SelectionContext.REQUEST)) {
             return null;
         }
 
@@ -96,8 +148,9 @@ public class PopMenu  implements ContextMenuItemsProvider {
         int end = selectionOffsets.endIndexExclusive();
         String path = event.messageEditorRequestResponse().get().requestResponse().request().pathWithoutQuery();
         String selectText;
-        if (end > start){
-            selectText = event.messageEditorRequestResponse().get().requestResponse().request().toString().substring(start, end);
+        if (end > start) {
+            selectText = event.messageEditorRequestResponse().get().requestResponse().request().toString()
+                              .substring(start, end);
         } else {
             selectText = null;
         }
@@ -105,28 +158,26 @@ public class PopMenu  implements ContextMenuItemsProvider {
         JMenu addSubHighLightMenu = new JMenu("添加高亮");
         JMenu addSelectedHighLightMenu = new JMenu("添加选中高亮");
 
-        HighLighter.COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
+        COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
             JMenuItem addHighLightItem = new JMenuItem(COLOR_STRING_MAP.get(color));
             addHighLightItem.setBackground(color);
             addHighLightItem.setOpaque(true);
-            addHighLightItem.addActionListener(e -> {
-                SwingUtilities.invokeLater(() -> {
-                    List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
-                    for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
-                        String requestPath = proxyHttpRequestResponse.request().pathWithoutQuery();
-                        if (requestPath.equals(path)){
-                            proxyHttpRequestResponse.annotations().setHighlightColor(highlightColor);
-                        }
+            addHighLightItem.addActionListener(e -> SwingUtilities.invokeLater(() -> {
+                List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
+                for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
+                    String requestPath = proxyHttpRequestResponse.request().pathWithoutQuery();
+                    if (requestPath.equals(path)) {
+                        proxyHttpRequestResponse.annotations().setHighlightColor(highlightColor);
                     }
-                    HighLighter.requestHighlightKey.add(path);
-                    HighLighter.requestHighlightColor.put(path, highlightColor);
-                });
-            });
+                }
+                GlobalVar.highLightPathSet.add(path);
+                GlobalVar.requestPathHighlightColor.put(path, highlightColor);
+            }));
             addSubHighLightMenu.add(addHighLightItem);
         });
 
-        if (selectText != null){
-            HighLighter.COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
+        if (selectText != null) {
+            COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
                 JMenuItem addHighLightItem = new JMenuItem(COLOR_STRING_MAP.get(color));
                 addHighLightItem.setBackground(color);
                 addHighLightItem.setOpaque(true);
@@ -135,12 +186,12 @@ public class PopMenu  implements ContextMenuItemsProvider {
                         List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
                         for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
                             String requestPath = proxyHttpRequestResponse.request().pathWithoutQuery();
-                            if (requestPath.contains(path)){
+                            if (requestPath.contains(path)) {
                                 proxyHttpRequestResponse.annotations().setHighlightColor(highlightColor);
                             }
                         }
-                        HighLighter.requestHighlightKey.add(selectText);
-                        HighLighter.requestHighlightColor.put(selectText, highlightColor);
+                        GlobalVar.highLightPathSet.add(selectText);
+                        GlobalVar.requestPathHighlightColor.put(selectText, highlightColor);
                     });
                 });
                 addSelectedHighLightMenu.add(addHighLightItem);
@@ -152,137 +203,110 @@ public class PopMenu  implements ContextMenuItemsProvider {
         return menuItemList;
     }
 
-    private void addHighLight(ContextMenuEvent event, List<HttpRequestResponse> selectededRequestResponseList, JMenu addHighLightMenu){
+    private void addHighLight(ContextMenuEvent event, List<HttpRequestResponse> selectededRequestResponseList, JMenu addHighLightMenu) {
         logger.logToOutput("addHighLight()...");
-        if (1 == selectededRequestResponseList.size()){
-            HttpRequestResponse requestResponse = selectededRequestResponseList.get(0);
-            String path = requestResponse.request().pathWithoutQuery();
-            if (HighLighter.requestHighlightKey.contains(path)){
-                logger.logToOutput("已存在");
-                return;
-            }
-            JMenu addSubHighLightMenu = new JMenu("添加高亮");
-            HighLighter.COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
-                JMenuItem addHighLightItem = new JMenuItem(COLOR_STRING_MAP.get(color));
-                addHighLightItem.setBackground(color);
-                addHighLightItem.setOpaque(true);
-                addHighLightItem.addActionListener(e -> {
-                    SwingUtilities.invokeLater(() -> {
-                        List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
-                        for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
-                            if (proxyHttpRequestResponse.request().pathWithoutQuery().equals(path)){
-                                proxyHttpRequestResponse.annotations().setHighlightColor(highlightColor);
-                            }
-                        }
-                    });
-                    HighLighter.requestHighlightKey.add(path);
-                });
-                addSubHighLightMenu.add(addHighLightItem);
-
-                // 如果是请求报文且鼠标选择了某些字符串
-//                Optional<Selection> selection = api.montoya.ui.editor.Editor.currentRequest().selection();
-
-            });
-            addHighLightMenu.add(addSubHighLightMenu);
-        }else {
-            JMenuItem addFirstItem = new JMenuItem("第一个高亮");
-            JMenuItem addHighLightItem = new JMenuItem("所有高亮");
-        }
-    }
-    private void removeHighLight(ContextMenuEvent event, List<HttpRequestResponse> selectededRequestResponseList, JMenu removeHighLightMenu) {
-        logger.logToOutput("removeHighLight()...");
-        if (1 == selectededRequestResponseList.size()){
-            HttpRequestResponse requestResponse = selectededRequestResponseList.get(0);
-            String path = requestResponse.request().pathWithoutQuery();
-            JMenuItem removeHighLightItem = new JMenuItem("取消高亮");
-            JMenuItem removeAllHighLightItem = new JMenuItem("所有取消高亮");
-
-            removeHighLightItem.addActionListener(e -> {
-                if (!HighLighter.requestHighlightKey.contains(path)){
-                    logger.logToOutput("不存在");
-                    return;
-                }
-                SwingUtilities.invokeLater(() -> {
-                    List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
-                    for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
-                        if (proxyHttpRequestResponse.request().pathWithoutQuery().equals(path)){
-                            proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
-                        }
-                    }
-                    HighLighter.requestHighlightKey.remove(path);
-                });
-            });
-
-            removeAllHighLightItem.addActionListener(e -> {
-                SwingUtilities.invokeLater(() -> {
-                    List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
-                    for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
-                        proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
-                    }
-                    HighLighter.requestHighlightKey.clear();
-                });
-            });
-
-            removeHighLightMenu.add(removeHighLightItem);
-            removeHighLightMenu.add(removeAllHighLightItem);
-        }else{
-            JMenuItem removeFirstItem = new JMenuItem("第一个取消高亮");
-            JMenuItem removeSelectedHighLightItem = new JMenuItem("所有选择的取消高亮");
-            JMenuItem removeDialogMenuItem = new JMenuItem("弹窗选择");
-            JMenuItem removeAllHighLightItem = new JMenuItem("所有取消高亮");
-
-            removeFirstItem.addActionListener(e -> {
-                SwingUtilities.invokeLater(() -> {
-                    HttpRequestResponse requestResponse = selectededRequestResponseList.get(0);
-                    String selectedPath = requestResponse.request().pathWithoutQuery();
-                    List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
-                    for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
-                        String historyPath = proxyHttpRequestResponse.request().pathWithoutQuery();
-                        if (historyPath.equals(selectedPath)){
-                            proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
-                        }
-                    }
-                    HighLighter.requestHighlightKey.remove(selectedPath);
-                });
-            });
-
-            removeSelectedHighLightItem.addActionListener(e -> {
+        JMenu addHighLightSubMenu = new JMenu("添加高亮");
+        COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
+            JMenuItem addHighLightItem = new JMenuItem(COLOR_STRING_MAP.get(color));
+            addHighLightItem.setBackground(color);
+            addHighLightItem.setOpaque(true);
+            addHighLightItem.addActionListener(e -> {
                 SwingUtilities.invokeLater(() -> {
                     Set<String> pathSet = new HashSet<>();
-                    for (HttpRequestResponse requestResponse : selectededRequestResponseList) {
-                        String selectedPath = requestResponse.request().pathWithoutQuery();
-                        pathSet.add(selectedPath);
+                    for (HttpRequestResponse httpRequestResponse : selectededRequestResponseList) {
+                        String path = httpRequestResponse.request().pathWithoutQuery();
+                        if (!GlobalVar.isHighLightPath(path)){
+                            GlobalVar.highLightPathSet.add(path);
+                            GlobalVar.addHighLightPath(path, highlightColor);
+                            pathSet.add(path);
+                        }
                     }
+                    api.proxy().history().forEach(proxyHttpRequestResponse -> {
+                        String path = proxyHttpRequestResponse.request().pathWithoutQuery();
+                        if (pathSet.contains(path)){
+                            proxyHttpRequestResponse.annotations().setHighlightColor(highlightColor);
+                        }
+                    });
 
-                    List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
-                    for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
-                        String historyPath = proxyHttpRequestResponse.request().pathWithoutQuery();
-                        if (pathSet.contains(historyPath)){
+                });
+            });
+            addHighLightSubMenu.add(addHighLightItem);
+        });
+        addHighLightMenu.add(addHighLightSubMenu);
+    }
+
+    private void removeHighLight(ContextMenuEvent event, List<HttpRequestResponse> selectededRequestResponseList,
+                                 JMenu removeHighLightMenu) {
+        logger.logToOutput("removeHighLight()...");
+        JMenu removeHighLightSubMenu = new JMenu("移除高亮");
+        COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
+            JMenuItem removeHighLightItem = new JMenuItem(COLOR_STRING_MAP.get(color));
+            removeHighLightItem.setBackground(color);
+            removeHighLightItem.setOpaque(true);
+            removeHighLightItem.addActionListener(e -> {
+                SwingUtilities.invokeLater(() -> {
+                    Set<String> pathSet = new HashSet<>();
+                    for (HttpRequestResponse httpRequestResponse : selectededRequestResponseList) {
+                        String path = httpRequestResponse.request().pathWithoutQuery();
+                        if (GlobalVar.isHighLightPath(path)){
+                            GlobalVar.removeHighLightPath(path);
+                            pathSet.add(path);
+                        }
+                   }
+                    api.proxy().history().forEach(proxyHttpRequestResponse -> {
+                        String path = proxyHttpRequestResponse.request().pathWithoutQuery();
+                        if (pathSet.contains(path)){
+                            proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
+                        }
+                    });
+                });
+            });
+            removeHighLightSubMenu.add(removeHighLightItem);
+        });
+        removeHighLightMenu.add(removeHighLightSubMenu);
+
+        JMenuItem removeAllHighLightSubMenu = new JMenuItem("移除所有高亮");
+        removeAllHighLightSubMenu.addActionListener(e -> {
+            SwingUtilities.invokeLater(() -> {
+                GlobalVar.clearHighLightPath();
+                GlobalVar.clearHighLightSelectString();
+                api.proxy().history().forEach(proxyHttpRequestResponse -> {
+                    proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
+                });
+            });
+        });
+        removeHighLightMenu.add(removeAllHighLightSubMenu);
+
+        JMenuItem removeHighLightPath = new JMenuItem("移除高亮路径");
+        removeHighLightPath.addActionListener(e -> {
+            SwingUtilities.invokeLater(() -> {
+                GlobalVar.clearHighLightPath();
+                api.proxy().history().forEach(proxyHttpRequestResponse -> {
+                    String path = proxyHttpRequestResponse.request().pathWithoutQuery();
+                    if (GlobalVar.isHighLightPath(path)){
+                        proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
+                    }
+                });
+            });
+        });
+        removeHighLightMenu.add(removeHighLightPath);
+
+
+        JMenuItem removeHighLightSelectString = new JMenuItem("移除选中字符串高亮");
+        removeHighLightSelectString.addActionListener(e -> {
+            SwingUtilities.invokeLater(() -> {
+                GlobalVar.clearHighLightSelectString();
+                api.proxy().history().forEach(proxyHttpRequestResponse -> {
+                    if (HttpTools.isProxyHttpRequestResponsePrintable(proxyHttpRequestResponse)){
+                        String requestString = proxyHttpRequestResponse.request().toString();
+                        if (GlobalVar.isHighLightSelectString(requestString)){
                             proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
                         }
                     }
-                    HighLighter.requestHighlightKey.removeAll(pathSet);
                 });
             });
+        });
+        removeHighLightMenu.add(removeHighLightSelectString);
 
-            removeDialogMenuItem.addActionListener(e -> {
-                logger.logToOutput("弹窗选择");
-            });
-
-            removeAllHighLightItem.addActionListener(e -> {
-                SwingUtilities.invokeLater(() -> {
-                    List<ProxyHttpRequestResponse> proxyHttpRequestResponseList = api.proxy().history();
-                    for (ProxyHttpRequestResponse proxyHttpRequestResponse : proxyHttpRequestResponseList) {
-                        proxyHttpRequestResponse.annotations().setHighlightColor(HighlightColor.NONE);
-                    }
-                    HighLighter.requestHighlightKey.clear();
-                });
-            });
-
-            removeHighLightMenu.add(removeFirstItem);
-            removeHighLightMenu.add(removeSelectedHighLightItem);
-            removeHighLightMenu.add(removeDialogMenuItem);
-            removeHighLightMenu.add(removeAllHighLightItem);
-        }
     }
 }
