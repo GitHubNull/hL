@@ -2,11 +2,15 @@ package top.oxff.tools;
 
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
 import burp.api.montoya.http.message.HttpHeader;
+import burp.api.montoya.http.message.HttpRequestResponse;
+import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.proxy.ProxyHttpRequestResponse;
+import top.oxff.model.SelectionPositionType;
 
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.IllegalFormatCodePointException;
 import java.util.List;
 
 public class HttpTools {
@@ -172,5 +176,142 @@ public class HttpTools {
 
         // 检查字节数组是否可打印
         return isBytesPrintable(requestBytes, charset);
+    }
+
+    // 获取http请求头第一行的结束位置
+    public static int getHttpRequestFirstLineEndPosition(byte[] requestBytes, int requestLength) {
+        if (requestBytes == null || requestLength <= 0){
+            return -1;
+        }
+        int end = -1;
+        for (int i = 0; i < requestLength; i++) {
+            if (requestBytes[i] == '\n') {
+                end = i;
+                break;
+            } else if (requestBytes[i] == '\r' && requestBytes[i + 1] == '\n') {
+                end = i + 1;
+                break;
+            }
+        }
+        return end;
+    }
+
+    // 获取http请求头结束位置
+    public static int getHttpRequestEndPosition(byte[] requestBytes, int requestLength) {
+        if (requestBytes == null || requestLength <= 0){
+            return -1;
+        }
+
+        int end = -1;
+        for (int i = 0; i < requestLength; i++) {
+            if (requestBytes[i] == '\n' && requestBytes[i + 1] == '\n') {
+                end = i + 1;
+                break;
+            } else if (requestBytes[i] == '\r' && requestBytes[i + 1] == '\n'  && (requestBytes[i + 2] == '\n' || requestBytes[i + 2] == '\r')) {
+                end = i + 2;
+                break;
+            }
+        }
+        return end;
+    }
+
+    /**
+     * 根据给定的HttpRequestResponse对象和选择的文本范围，确定选择的文本位置类型
+     *
+     * @param httpRequestResponse HttpRequestResponse对象，包含HTTP请求和响应信息
+     * @param start 选择范围的起始位置
+     * @param end 选择范围的结束位置
+     * @return 返回选择的文本位置类型，如果选择范围无效或请求为空，则返回NONE
+     */
+    public static SelectionPositionType getSelectHttpRequestTextPositionType(HttpRequestResponse httpRequestResponse, int start,
+                                                                                 int end) {
+        // 检查输入参数的有效性，如果无效则返回NONE
+        if (httpRequestResponse == null || start < 0 || end <= 0 || end < start) {
+            return SelectionPositionType.NONE;
+        }
+
+        // 获取HTTP请求对象
+        HttpRequest httpRequest = httpRequestResponse.request();
+        // 如果请求对象为空，则返回NONE
+        if (httpRequest == null) {
+            return SelectionPositionType.NONE;
+        }
+
+        // 将HTTP请求转换为字节数组
+        byte[] requestBytes = httpRequest.toByteArray().getBytes();
+        // 如果字节数组为空，则返回NONE
+        if (requestBytes == null) {
+            return SelectionPositionType.NONE;
+        }
+
+        // 获取请求的总长度
+        int requestLength = requestBytes.length;
+        // 如果请求长度小于等于0，则返回NONE
+        if (requestLength == 0) {
+            return SelectionPositionType.NONE;
+        }
+
+        // 如果选择范围超出请求长度，则返回NONE
+        if (start >= requestLength || end > requestLength) {
+            return SelectionPositionType.NONE;
+        }
+
+        // 获取请求头第一行的结束位置
+        int headerFirstLineEndPosition = getHttpRequestFirstLineEndPosition(requestBytes, requestLength);
+        // 如果无法确定第一行的结束位置，则返回NONE
+        if (headerFirstLineEndPosition == -1) {
+            return SelectionPositionType.NONE;
+        }
+
+        // 获取请求头的结束位置
+        int headerEndPosition = getHttpRequestEndPosition(requestBytes, requestLength);
+        // 如果无法确定请求头的结束位置，则返回NONE
+        if (headerEndPosition == -1) {
+            return SelectionPositionType.NONE;
+        }
+
+        // 获取请求体的起始位置
+        int bodyStartPosition = httpRequest.bodyOffset();
+
+        // 根据选择范围和请求头、请求体的位置关系，确定并返回选择的文本位置类型
+        if (0 == start) {
+            if (end < headerFirstLineEndPosition) {
+                return SelectionPositionType.SUB_HEADER_FIRST_LINE;
+            } else if (end == headerFirstLineEndPosition) {
+                return SelectionPositionType.HEADER_FIRST_LINE;
+            } else if (end < headerEndPosition) {
+                return SelectionPositionType.SUB_HEADER_LINES;
+            } else if (end == headerEndPosition) {
+                return SelectionPositionType.ALL_HEADER_LINES;
+            } else if (end <= bodyStartPosition) {
+                return SelectionPositionType.ALL_HEADER_LINES_AND_BLANK_LINES_BEFORE_BODY;
+            } else if (end > bodyStartPosition && end < requestLength){
+                return SelectionPositionType.ALL_HEADER_LINES_AND_BLANK_LINES_AND_SUB_BODY;
+            }else {
+                return SelectionPositionType.ALL;
+            }
+        } else {
+            if (start < headerFirstLineEndPosition && end < headerFirstLineEndPosition) {
+                return SelectionPositionType.IN_HEADER_FIRST_LINE;
+            } else if (start >= headerFirstLineEndPosition && start < headerEndPosition && end < headerEndPosition) {
+                return SelectionPositionType.HEADER_OTHER_LINES;
+            } else if (start >= headerEndPosition && start < bodyStartPosition) {
+                return SelectionPositionType.BETWEEN_HEADER_END_AND_BODY;
+            } else if (start == bodyStartPosition) {
+                if (end < requestLength) {
+                    return SelectionPositionType.SUB_BODY;
+                } else {
+                    return SelectionPositionType.BODY;
+                }
+            } else if (start > bodyStartPosition) {
+                if (end < requestLength) {
+                    return SelectionPositionType.IN_BODY;
+                } else {
+                    return SelectionPositionType.SUB_BODY;
+                }
+            }else {
+                return SelectionPositionType.NONE;
+            }
+        }
     }
 }
