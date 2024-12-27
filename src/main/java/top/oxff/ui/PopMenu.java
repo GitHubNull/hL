@@ -93,38 +93,41 @@ public class PopMenu implements ContextMenuItemsProvider {
                 Range selectionOffsets = messageEditorHttpRequestResponse.selectionOffsets().get();
                 int start = selectionOffsets.startIndexInclusive();
                 int end = selectionOffsets.endIndexExclusive();
-                int selectLength = end - start;
+//                int selectLength = end - start;
                 HttpRequestResponse httpRequestResponse = messageEditorHttpRequestResponse.requestResponse();
-                HttpRequest httpRequest = httpRequestResponse.request();
-                byte[] requestBytes = httpRequest.toByteArray().getBytes();
-                byte[] selectedBytes = Arrays.copyOfRange(requestBytes, start, end);
-                boolean isPrintable = HttpTools.isBytesPrintable(selectedBytes);
-                if (isPrintable && MINI_SELECT_STRING_LENGTH <= selectLength) {
-                    String selectString = event.messageEditorRequestResponse().get().requestResponse().request()
-                                               .toString().substring(start, end);
-                    JMenu addHighLightMenu = new JMenu("添加选择字符串高亮");
-                    COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
-                        JMenuItem addHighLightItem = new JMenuItem(COLOR_STRING_MAP.get(color));
-                        addHighLightItem.setBackground(color);
-                        addHighLightItem.setOpaque(true);
-                        addHighLightItem.addActionListener(e -> {
-                            GlobalVar.highLightSelectStringSet.add(selectString);
-                            GlobalVar.selectStringHighlightColor.put(selectString, highlightColor);
-                            for (ProxyHttpRequestResponse proxyHttpRequestResponse : api.proxy().history()) {
-                                if (HttpTools.isProxyHttpRequestResponsePrintable(proxyHttpRequestResponse)) {
-
-                                    String requestString = proxyHttpRequestResponse.request().toString();
-                                    if (GlobalVar.isHighLightSelectString(requestString)){
-                                        proxyHttpRequestResponse.annotations().setHighlightColor(highlightColor);
-                                    }
-                                }
-                            }
-                            httpRequestResponse.annotations().setHighlightColor(highlightColor);
-                        });
-                        addHighLightMenu.add(addHighLightItem);
-                    });
-                    menuItemList.add(addHighLightMenu);
-                }
+                HttpRequestMessageViewPopMenu httpRequestMessageViewPopMenu =
+                        new HttpRequestMessageViewPopMenu(api, httpRequestResponse, start, end);
+                httpRequestMessageViewPopMenu.genMenus(menuItemList);
+//                HttpRequest httpRequest = httpRequestResponse.request();
+//                byte[] requestBytes = httpRequest.toByteArray().getBytes();
+//                byte[] selectedBytes = Arrays.copyOfRange(requestBytes, start, end);
+//                boolean isPrintable = HttpTools.isBytesPrintable(selectedBytes);
+//                if (isPrintable && MINI_SELECT_STRING_LENGTH <= selectLength) {
+//                    String selectString = event.messageEditorRequestResponse().get().requestResponse().request()
+//                                               .toString().substring(start, end);
+//                    JMenu addHighLightMenu = new JMenu("添加选择字符串高亮");
+//                    COLOR_TO_HIGHLIGHT_COLOR_MAP.forEach((color, highlightColor) -> {
+//                        JMenuItem addHighLightItem = new JMenuItem(COLOR_STRING_MAP.get(color));
+//                        addHighLightItem.setBackground(color);
+//                        addHighLightItem.setOpaque(true);
+//                        addHighLightItem.addActionListener(e -> {
+//                            GlobalVar.highLightSelectStringSet.add(selectString);
+//                            GlobalVar.selectStringHighlightColor.put(selectString, highlightColor);
+//                            for (ProxyHttpRequestResponse proxyHttpRequestResponse : api.proxy().history()) {
+//                                if (HttpTools.isProxyHttpRequestResponsePrintable(proxyHttpRequestResponse)) {
+//
+//                                    String requestString = proxyHttpRequestResponse.request().toString();
+//                                    if (GlobalVar.isHighLightSelectString(requestString)){
+//                                        proxyHttpRequestResponse.annotations().setHighlightColor(highlightColor);
+//                                    }
+//                                }
+//                            }
+//                            httpRequestResponse.annotations().setHighlightColor(highlightColor);
+//                        });
+//                        addHighLightMenu.add(addHighLightItem);
+//                    });
+//                    menuItemList.add(addHighLightMenu);
+//                }
             }
 
         }
